@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+.next/
+
+# Environment
+.env
+.env.local
+
+# Database
+drizzle/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Seed/Temporary
+seed.ts
+run.js
+test.js
