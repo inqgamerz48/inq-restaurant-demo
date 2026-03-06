@@ -1,30 +1,61 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, Clock, Save, LogOut } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Save, LogOut, Plus, Edit2, Trash2 } from 'lucide-react';
+
+type Tab = 'menu' | 'reservations' | 'testimonials' | 'hours';
 
 export default function AdminDashboard() {
     const [token, setToken] = useState('');
     const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const [reservations, setReservations] = useState<any[]>([]);
+    const [activeTab, setActiveTab] = useState<Tab>('menu');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    
+    const [menuItems, setMenuItems] = useState<any[]>([]);
+    const [reservations, setReservations] = useState<any[]>([]);
+    const [testimonials, setTestimonials] = useState<any[]>([]);
+    const [hours, setHours] = useState<any[]>([]);
+    
+    const [showModal, setShowModal] = useState(false);
+    const [editItem, setEditItem] = useState<any>(null);
+    const [modalType, setModalType] = useState('');
+
+    const API = '';
+
+    const fetchData = async () => {
+        setLoading(true);
+        try {
+            const [menuRes, resRes, testiRes, hoursRes] = await Promise.all([
+                fetch('/api/menu'),
+                fetch('/api/reservations'),
+                fetch('/api/testimonials'),
+                fetch('/api/hours')
+            ]);
+            setMenuItems(await menuRes.json());
+            setReservations(await resRes.json());
+            setTestimonials(await testiRes.json());
+            setHours(await hoursRes.json());
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const fetchReservations = async (authToken: string) => {
         setLoading(true);
         setError('');
         try {
             const res = await fetch('/api/admin/reservations', {
-                headers: {
-                    'Authorization': `Bearer ${authToken}`
-                }
+                headers: { 'Authorization': `Bearer ${authToken}` }
             });
             if (!res.ok) throw new Error('Invalid Admin Token');
             const data = await res.json();
             setReservations(data);
             setIsAuthenticated(true);
             setToken(authToken);
-            // Save temp to localStorage
             localStorage.setItem('adminToken', authToken);
+            await fetchData();
         } catch (err: any) {
             setError(err.message);
             setIsAuthenticated(false);
@@ -44,30 +75,69 @@ export default function AdminDashboard() {
         fetchReservations(token);
     };
 
-    const updateStatus = async (id: number, status: string) => {
-        try {
-            const res = await fetch('/api/admin/reservations', {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ id, status })
-            });
-            if (res.ok) {
-                setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
-            } else {
-                alert('Failed to update status');
-            }
-        } catch (err) {
-            alert('Error updating status');
-        }
-    };
-
     const handleLogout = () => {
         localStorage.removeItem('adminToken');
         setIsAuthenticated(false);
         setToken('');
+    };
+
+    const updateStatus = async (id: number, status: string) => {
+        try {
+            const res = await fetch(`/api/reservations/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+            });
+            if (res.ok) {
+                setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const openModal = (type: string, item: any = null) => {
+        setModalType(type);
+        setEditItem(item);
+        setShowModal(true);
+    };
+
+    const closeModal = () => {
+        setShowModal(false);
+        setEditItem(null);
+        setModalType('');
+    };
+
+    const handleSave = async (e: React.FormEvent<any>) => {
+        e.preventDefault();
+        const form = e.target as HTMLFormElement;
+        const data = Object.fromEntries(new FormData(form));
+        
+        const endpoint = modalType;
+        const method = editItem ? 'PUT' : 'POST';
+        const url = editItem ? `/api/${endpoint}/${editItem.id}` : `/api/${endpoint}`;
+        
+        try {
+            await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            closeModal();
+            fetchData();
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleDelete = async (type: string, id: number) => {
+        if (!confirm('Delete this item?')) return;
+        try {
+            await fetch(`/api/${type}/${id}`, { method: 'DELETE' });
+            fetchData();
+        } catch (err) {
+            console.error(err);
+        }
     };
 
     if (!isAuthenticated) {
@@ -110,83 +180,213 @@ export default function AdminDashboard() {
                 </button>
             </header>
 
+            <div className="tabs flex bg-brand-surface border-b border-brand-border">
+                {(['menu', 'reservations', 'testimonials', 'hours'] as Tab[]).map(tab => (
+                    <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={`px-6 py-4 text-sm uppercase tracking-widest transition-colors ${
+                            activeTab === tab 
+                            ? 'text-brand-gold border-b-2 border-brand-gold' 
+                            : 'text-brand-muted hover:text-brand-cream'
+                        }`}
+                    >
+                        {tab}
+                    </button>
+                ))}
+            </div>
+
             <main className="p-8 max-w-7xl mx-auto">
-                <div className="flex justify-between items-end mb-8">
-                    <h2 className="text-2xl font-light tracking-wide">Reservation Requests</h2>
-                    <div className="text-sm text-brand-muted bg-brand-surface px-4 py-2 border border-brand-border">
-                        Total Pending: <span className="text-brand-gold font-bold ml-1">{reservations.filter(r => r.status === 'pending').length}</span>
+                {activeTab === 'menu' && (
+                    <>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-light tracking-wide">Menu Items</h2>
+                            <button onClick={() => openModal('menu')} className="flex items-center gap-2 bg-brand-gold text-brand-bg px-4 py-2 text-sm font-bold uppercase tracking-widest">
+                                <Plus size={16} /> Add Item
+                            </button>
+                        </div>
+                        <div className="grid gap-4">
+                            {menuItems.map(item => (
+                                <div key={item.id} className="bg-brand-surface border border-brand-border p-4 flex items-center gap-4">
+                                    <img src={item.imageUrl} alt={item.name} className="w-16 h-12 object-cover rounded" />
+                                    <div className="flex-1">
+                                        <div className="font-medium">{item.name}</div>
+                                        <div className="text-sm text-brand-muted">{item.category} · {item.price}</div>
+                                    </div>
+                                    <span className="px-2 py-1 bg-brand-gold/20 text-brand-gold text-xs">{item.tag}</span>
+                                    <button onClick={() => openModal('menu', item)} className="p-2 text-brand-muted hover:text-brand-gold"><Edit2 size={16} /></button>
+                                    <button onClick={() => handleDelete('menu', item.id)} className="p-2 text-brand-muted hover:text-brand-red"><Trash2 size={16} /></button>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+
+                {activeTab === 'reservations' && (
+                    <>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-light tracking-wide">Reservations</h2>
+                            <div className="text-sm text-brand-muted bg-brand-surface px-4 py-2 border border-brand-border">
+                                Pending: <span className="text-brand-gold font-bold">{reservations.filter(r => r.status === 'pending').length}</span>
+                            </div>
+                        </div>
+                        <div className="bg-brand-surface border border-brand-border overflow-hidden">
+                            <table className="w-full text-left">
+                                <thead className="border-b border-brand-border bg-brand-bg/50">
+                                    <tr>
+                                        <th className="py-3 px-4 text-xs uppercase tracking-widest text-brand-muted">Guest</th>
+                                        <th className="py-3 px-4 text-xs uppercase tracking-widest text-brand-muted">Date</th>
+                                        <th className="py-3 px-4 text-xs uppercase tracking-widest text-brand-muted">Time</th>
+                                        <th className="py-3 px-4 text-xs uppercase tracking-widest text-brand-muted">Guests</th>
+                                        <th className="py-3 px-4 text-xs uppercase tracking-widest text-brand-muted">Status</th>
+                                        <th className="py-3 px-4 text-xs uppercase tracking-widest text-brand-muted text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {reservations.map(res => (
+                                        <tr key={res.id} className="border-b border-brand-border/50">
+                                            <td className="py-3 px-4">{res.name}<br/><span className="text-xs text-brand-muted">{res.email}</span></td>
+                                            <td className="py-3 px-4">{res.date}</td>
+                                            <td className="py-3 px-4 text-brand-gold">{res.time}</td>
+                                            <td className="py-3 px-4 text-center">{res.guests}</td>
+                                            <td className="py-3 px-4">
+                                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                                    res.status === 'confirmed' ? 'bg-green-900/20 text-green-400' :
+                                                    res.status === 'cancelled' ? 'bg-red-900/20 text-brand-red' :
+                                                    'bg-yellow-900/20 text-brand-gold'
+                                                }`}>{res.status}</span>
+                                            </td>
+                                            <td className="py-3 px-4 text-right">
+                                                <button onClick={() => updateStatus(res.id, 'confirmed')} className="p-1 text-brand-muted hover:text-green-400"><CheckCircle size={18} /></button>
+                                                <button onClick={() => updateStatus(res.id, 'cancelled')} className="p-1 text-brand-muted hover:text-brand-red ml-2"><XCircle size={18} /></button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                )}
+
+                {activeTab === 'testimonials' && (
+                    <>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-light tracking-wide">Testimonials</h2>
+                            <button onClick={() => openModal('testimonials')} className="flex items-center gap-2 bg-brand-gold text-brand-bg px-4 py-2 text-sm font-bold uppercase tracking-widest">
+                                <Plus size={16} /> Add Testimonial
+                            </button>
+                        </div>
+                        <div className="grid gap-4">
+                            {testimonials.map(t => (
+                                <div key={t.id} className="bg-brand-surface border border-brand-border p-4">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <div className="font-medium">{t.name}</div>
+                                            <div className="text-xs text-brand-muted">{t.role}</div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`px-2 py-1 rounded-full text-xs ${t.active ? 'bg-green-900/20 text-green-400' : 'bg-gray-800 text-gray-400'}`}>
+                                                {t.active ? 'Active' : 'Inactive'}
+                                            </span>
+                                            <button onClick={() => openModal('testimonials', t)} className="p-1 text-brand-muted hover:text-brand-gold"><Edit2 size={16} /></button>
+                                            <button onClick={() => handleDelete('testimonials', t.id)} className="p-1 text-brand-muted hover:text-brand-red"><Trash2 size={16} /></button>
+                                        </div>
+                                    </div>
+                                    <div className="text-sm text-brand-muted">{'★'.repeat(t.rating)}</div>
+                                    <div className="mt-2 text-sm">{t.text}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+
+                {activeTab === 'hours' && (
+                    <>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-light tracking-wide">Opening Hours</h2>
+                            <button onClick={() => openModal('hours')} className="flex items-center gap-2 bg-brand-gold text-brand-bg px-4 py-2 text-sm font-bold uppercase tracking-widest">
+                                <Plus size={16} /> Add Hours
+                            </button>
+                        </div>
+                        <div className="grid gap-4">
+                            {hours.map(h => (
+                                <div key={h.id} className="bg-brand-surface border border-brand-border p-4 flex items-center justify-between">
+                                    <div>
+                                        <div className="font-medium">{h.dayRange}</div>
+                                        <div className="text-brand-gold">{h.time}</div>
+                                        <div className="text-xs text-brand-muted">{h.note}</div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => openModal('hours', h)} className="p-2 text-brand-muted hover:text-brand-gold"><Edit2 size={16} /></button>
+                                        <button onClick={() => handleDelete('hours', h.id)} className="p-2 text-brand-muted hover:text-brand-red"><Trash2 size={16} /></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
+            </main>
+
+            {showModal && (
+                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={closeModal}>
+                    <div className="bg-brand-surface border border-brand-border p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl font-light mb-4 text-brand-gold">
+                            {editItem ? 'Edit' : 'Add'} {modalType}
+                        </h3>
+                        <form onSubmit={handleSave}>
+                            {modalType === 'menu' && (
+                                <>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Name</label><input name="name" defaultValue={editItem?.name} className="w-full bg-brand-bg border border-brand-border p-2" required /></div>
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Price</label><input name="price" defaultValue={editItem?.price} className="w-full bg-brand-bg border border-brand-border p-2" required /></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Category</label>
+                                            <select name="category" defaultValue={editItem?.category} className="w-full bg-brand-bg border border-brand-border p-2">
+                                                <option>Starters</option><option>Mains</option><option>Desserts</option><option>Drinks</option>
+                                            </select>
+                                        </div>
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Tag</label><input name="tag" defaultValue={editItem?.tag} className="w-full bg-brand-bg border border-brand-border p-2" /></div>
+                                    </div>
+                                    <div className="mb-4"><label className="block text-xs uppercase text-brand-muted mb-1">Description</label><textarea name="description" defaultValue={editItem?.description} className="w-full bg-brand-bg border border-brand-border p-2" rows={3} required /></div>
+                                    <div className="mb-4"><label className="block text-xs uppercase text-brand-muted mb-1">Image URL</label><input name="image_url" defaultValue={editItem?.imageUrl} className="w-full bg-brand-bg border border-brand-border p-2" /></div>
+                                </>
+                            )}
+                            {modalType === 'testimonials' && (
+                                <>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Name</label><input name="name" defaultValue={editItem?.name} className="w-full bg-brand-bg border border-brand-border p-2" required /></div>
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Role</label><input name="role" defaultValue={editItem?.role} className="w-full bg-brand-bg border border-brand-border p-2" /></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Rating</label><input name="rating" type="number" min="1" max="5" defaultValue={editItem?.rating || 5} className="w-full bg-brand-bg border border-brand-border p-2" /></div>
+                                        <div><label className="block text-xs uppercase text-brand-muted mb-1">Initials</label><input name="initials" defaultValue={editItem?.initials} className="w-full bg-brand-bg border border-brand-border p-2" /></div>
+                                    </div>
+                                    <div className="mb-4"><label className="block text-xs uppercase text-brand-muted mb-1">Text</label><textarea name="text" defaultValue={editItem?.text} className="w-full bg-brand-bg border border-brand-border p-2" rows={3} required /></div>
+                                    {editItem && (
+                                        <div className="mb-4"><label className="block text-xs uppercase text-brand-muted mb-1">Active</label>
+                                            <select name="active" defaultValue={editItem?.active} className="w-full bg-brand-bg border border-brand-border p-2">
+                                                <option value={1}>Yes</option><option value={0}>No</option>
+                                            </select>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                            {modalType === 'hours' && (
+                                <>
+                                    <div className="mb-4"><label className="block text-xs uppercase text-brand-muted mb-1">Day Range</label><input name="day_range" defaultValue={editItem?.dayRange} className="w-full bg-brand-bg border border-brand-border p-2" required /></div>
+                                    <div className="mb-4"><label className="block text-xs uppercase text-brand-muted mb-1">Time</label><input name="time" defaultValue={editItem?.time} className="w-full bg-brand-bg border border-brand-border p-2" required /></div>
+                                    <div className="mb-4"><label className="block text-xs uppercase text-brand-muted mb-1">Note</label><input name="note" defaultValue={editItem?.note} className="w-full bg-brand-bg border border-brand-border p-2" /></div>
+                                </>
+                            )}
+                            <div className="flex gap-4 mt-6">
+                                <button type="button" onClick={closeModal} className="flex-1 border border-brand-border py-2 text-brand-muted hover:text-brand-cream">Cancel</button>
+                                <button type="submit" className="flex-1 bg-brand-gold text-brand-bg py-2 font-bold">Save</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
-
-                <div className="bg-brand-surface border border-brand-border overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="border-b border-brand-border bg-brand-bg/50">
-                                <th className="py-4 px-6 text-xs uppercase tracking-widest text-brand-muted font-normal">Guest</th>
-                                <th className="py-4 px-6 text-xs uppercase tracking-widest text-brand-muted font-normal">Contact</th>
-                                <th className="py-4 px-6 text-xs uppercase tracking-widest text-brand-muted font-normal">Date & Time</th>
-                                <th className="py-4 px-6 text-xs uppercase tracking-widest text-brand-muted font-normal">Party</th>
-                                <th className="py-4 px-6 text-xs uppercase tracking-widest text-brand-muted font-normal">Requests</th>
-                                <th className="py-4 px-6 text-xs uppercase tracking-widest text-brand-muted font-normal">Status</th>
-                                <th className="py-4 px-6 text-xs uppercase tracking-widest text-brand-muted font-normal text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {reservations.length === 0 ? (
-                                <tr>
-                                    <td colSpan={7} className="py-12 text-center text-brand-muted italic">No reservations in the system yet.</td>
-                                </tr>
-                            ) : (
-                                reservations.map((res: any) => (
-                                    <tr key={res.id} className="border-b border-brand-border/50 hover:bg-brand-bg/30 transition-colors">
-                                        <td className="py-4 px-6 font-medium text-sm">{res.name}</td>
-                                        <td className="py-4 px-6 text-sm text-brand-muted">{res.email}</td>
-                                        <td className="py-4 px-6 text-sm">
-                                            <div className="flex flex-col gap-1">
-                                                <span>{res.date}</span>
-                                                <span className="text-brand-gold">{res.time}</span>
-                                            </div>
-                                        </td>
-                                        <td className="py-4 px-6 text-center">{res.guests}</td>
-                                        <td className="py-4 px-6 text-xs text-brand-muted max-w-[200px] truncate" title={res.specialRequests}>
-                                            {res.specialRequests || '—'}
-                                        </td>
-                                        <td className="py-4 px-6">
-                                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border
-                        ${res.status === 'confirmed' ? 'bg-green-900/20 text-green-400 border-green-900/50' :
-                                                    res.status === 'rejected' ? 'bg-red-900/20 text-brand-red border-brand-red/30' :
-                                                        'bg-yellow-900/20 text-brand-gold border-brand-gold/30'}`}>
-                                                {res.status === 'confirmed' && <CheckCircle size={12} />}
-                                                {res.status === 'rejected' && <XCircle size={12} />}
-                                                {res.status === 'pending' && <Clock size={12} />}
-                                                {res.status.charAt(0).toUpperCase() + res.status.slice(1)}
-                                            </span>
-                                        </td>
-                                        <td className="py-4 px-6 text-right space-x-2">
-                                            <button
-                                                onClick={() => updateStatus(res.id, 'confirmed')}
-                                                disabled={res.status === 'confirmed'}
-                                                className="p-2 border border-brand-border text-brand-muted hover:text-green-400 hover:border-green-400/50 transition-colors disabled:opacity-30"
-                                                title="Confirm"
-                                            >
-                                                <CheckCircle size={16} />
-                                            </button>
-                                            <button
-                                                onClick={() => updateStatus(res.id, 'rejected')}
-                                                disabled={res.status === 'rejected'}
-                                                className="p-2 border border-brand-border text-brand-muted hover:text-brand-red hover:border-brand-red/50 transition-colors disabled:opacity-30"
-                                                title="Reject"
-                                            >
-                                                <XCircle size={16} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </main>
+            )}
         </div>
     );
 }
